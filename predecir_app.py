@@ -1,223 +1,223 @@
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import messagebox
+import ttkbootstrap as ttk
+from ttkbootstrap.constants import *
 import pandas as pd
 import numpy as np
 import joblib
 import tensorflow as tf
 import os
 
-# --- 1. Cargar Modelo, Scaler y Opciones ---
+# --- CONFIGURACIÓN ---
+THEME_NAME = "superhero"  # Prueba: "journal", "flatly", "darkly", "superhero", "cyborg"
 
-# Nombres de archivos
+# --- 1. Cargar Modelo, Scaler y Opciones ---
 MODEL_FILE = "modelo_casas.keras"
 SCALER_FILE = "scaler_casas.pkl"
 CSV_FILE = "casas_limpias.csv"
 
-# Validar que los archivos existan
-if not all(os.path.exists(f) for f in [MODEL_FILE, SCALER_FILE, CSV_FILE]):
-    messagebox.showerror(
-        "Error de Archivos",
-        f"No se encontraron uno o más archivos necesarios:\n"
-        f"- {MODEL_FILE}\n- {SCALER_FILE}\n- {CSV_FILE}\n\n"
-        "Asegúrate de que estén en la misma carpeta que esta aplicación."
-    )
-    exit()
+# Validaciones iniciales
+files_exist = all(os.path.exists(f) for f in [MODEL_FILE, SCALER_FILE, CSV_FILE])
+model, scaler, df_opciones = None, None, None
 
-try:
-    # Cargar el modelo y el escalador al inicio
-    model = tf.keras.models.load_model(MODEL_FILE)
-    scaler = joblib.load(SCALER_FILE)
-    
-    # Cargar el CSV solo para obtener las opciones de los menús desplegables
-    df_opciones = pd.read_csv(CSV_FILE)
-except Exception as e:
-    messagebox.showerror(
-        "Error al Cargar",
-        f"No se pudieron cargar los archivos del modelo o el escalador: {e}"
-    )
-    exit()
-
-# --- 2. Definir las Características (Features) ---
-
-# Columnas numéricas (basadas en tu script de entrenamiento)
+# Definiciones de columnas (Se mantienen igual que tu lógica)
 NUMERIC_COLS = [
     'lotSize', 'age', 'landValue', 'livingArea', 'pctCollege',
     'bedrooms', 'fireplaces', 'bathrooms', 'rooms'
 ]
+CATEGORICAL_COLS_KEYS = [
+    'heating', 'fuel', 'sewer', 'waterfront', 'newConstruction', 'centralAir'
+]
 
-# Columnas categóricas y sus opciones (leídas del CSV)
-CATEGORICAL_COLS = {
-    'heating': sorted(df_opciones['heating'].unique().tolist()),
-    'fuel': sorted(df_opciones['fuel'].unique().tolist()),
-    'sewer': sorted(df_opciones['sewer'].unique().tolist()),
-    'waterfront': sorted(df_opciones['waterfront'].unique().tolist()),
-    'newConstruction': sorted(df_opciones['newConstruction'].unique().tolist()),
-    'centralAir': sorted(df_opciones['centralAir'].unique().tolist()),
-}
+if files_exist:
+    try:
+        model = tf.keras.models.load_model(MODEL_FILE)
+        scaler = joblib.load(SCALER_FILE)
+        df_opciones = pd.read_csv(CSV_FILE)
+        FINAL_FEATURES_ORDER = scaler.feature_names_in_
+        
+        # Cargar opciones reales del CSV
+        CATEGORICAL_COLS = {
+            key: sorted(df_opciones[key].unique().tolist()) for key in CATEGORICAL_COLS_KEYS
+        }
+    except Exception as e:
+        print(f"Error cargando archivos ML: {e}")
+        # Valores dummy por si falla la carga para que veas la interfaz
+        CATEGORICAL_COLS = {key: ["Opcion A", "Opcion B"] for key in CATEGORICAL_COLS_KEYS}
+        FINAL_FEATURES_ORDER = []
+else:
+    # Valores dummy para diseño si no hay archivos
+    CATEGORICAL_COLS = {key: ["Opcion A", "Opcion B"] for key in CATEGORICAL_COLS_KEYS}
+    FINAL_FEATURES_ORDER = []
 
-# Obtenemos la lista exacta de 18 características que el modelo espera
-# de los archivos del escalador
-FINAL_FEATURES_ORDER = scaler.feature_names_in_
-
-# --- 3. Lógica de Predicción ---
-
+# --- 2. Lógica de Predicción ---
 def predecir_precio():
-    """
-    Toma los valores de la GUI, los procesa y muestra la predicción.
-    """
-    
-    # 1. Recolectar datos de la GUI
+    if not files_exist or model is None:
+        messagebox.showerror("Error", "No se cargaron los modelos de IA.")
+        return
+
+    # 1. Recolectar datos
     try:
         input_data = {}
-        # Recolectar numéricos
         for col in NUMERIC_COLS:
-            input_data[col] = float(widgets[col].get())
+            val = widgets[col].get()
+            if not val: val = 0
+            input_data[col] = float(val)
             
-        # Recolectar categóricos
         for col in CATEGORICAL_COLS:
             input_data[col] = widgets[col].get()
             
     except ValueError:
-        messagebox.showwarning(
-            "Entrada Inválida",
-            "Por favor, ingrese números válidos en todos los campos numéricos."
-        )
+        messagebox.showwarning("Error", "Revisa los campos numéricos.")
         return
 
-    # 2. Crear un DataFrame de una fila
-    input_df = pd.DataFrame([input_data])
+    # --- VALIDACIÓN ESTRICTA CON MENSAJE ---
+    # Verificamos si los campos críticos son 0.
+    if input_data['livingArea'] == 0 or input_data['lotSize'] == 0:
+        # 1. Mostrar mensaje emergente
+        messagebox.showwarning(
+            "Datos Incompletos", 
+            "Para realizar una predicción válida, debes ingresar valores mayores a 0 en:\n\n- LotSize (Tamaño Lote)\n- LivingArea (Área Habitable)"
+        )
+        # 2. Resetear el resultado visual para no confundir
+        lbl_result_value.config(text="$ 0.00", bootstyle="secondary")
+        lbl_result_msg.config(text="Faltan datos", bootstyle="warning")
+        return
+    # ---------------------------------------------
 
-    # 3. Aplicar One-Hot Encoding (como en el script de entrenamiento)
-    # Convertimos las columnas categóricas a tipo "category" con todas las
-    # opciones posibles, para asegurar que pd.get_dummies cree todas
-    # las columnas necesarias, incluso si no están en esta fila.
+    # 2. Procesamiento (Igual a tu script original)
+    input_df = pd.DataFrame([input_data])
+    
     for col, options in CATEGORICAL_COLS.items():
         input_df[col] = pd.Categorical(input_df[col], categories=options)
 
-    # Aplicamos get_dummies
-    input_encoded = pd.get_dummies(
-        input_df, 
-        columns=CATEGORICAL_COLS.keys(), 
-        drop_first=True
-    )
+    input_encoded = pd.get_dummies(input_df, columns=CATEGORICAL_COLS.keys(), drop_first=True)
 
-    # 4. Reordenar y rellenar columnas
-    # Aseguramos que el DataFrame tenga exactamente las mismas 18 columnas
-    # en el orden correcto que el modelo espera.
-    # Rellenamos con 0 las columnas que no se generaron (si aplica)
     input_final = pd.DataFrame(columns=FINAL_FEATURES_ORDER)
     input_final = input_final.reindex(columns=FINAL_FEATURES_ORDER, fill_value=0)
     
-    # Copiamos los valores que sí tenemos
     for col in input_encoded.columns:
         if col in input_final.columns:
             input_final[col] = input_encoded[col]
 
-    # 5. Escalar los datos
-    # Usamos el escalador cargado
     try:
         input_scaled = scaler.transform(input_final)
-    except Exception as e:
-        messagebox.showerror("Error de Escalado", f"Error al transformar los datos: {e}\n\nDatos:\n{input_final.to_string()}")
-        return
-
-    # 6. Realizar la predicción
-    try:
         prediction = model.predict(input_scaled)
-        predicted_price = prediction[0][0]
+        price = prediction[0][0]
         
-        # 7. Mostrar el resultado
-        result_var.set(f"Precio Predicho: ${predicted_price:,.2f}")
+        # Animación simple del resultado
+        lbl_result_value.config(text=f"$ {price:,.2f}", bootstyle="inverse-success")
+        lbl_result_msg.config(text="Valor Estimado", bootstyle="success")
         
     except Exception as e:
-        messagebox.showerror("Error de Predicción", f"Error al predecir: {e}")
-        result_var.set("Error al predecir.")
+        messagebox.showerror("Error", f"Fallo en predicción: {e}")
 
+# --- 3. Interfaz Gráfica (MEJORADA) ---
 
-# --- 4. Configuración de la Interfaz (GUI) ---
-app = tk.Tk()
-app.title("Predictor de Precios de Casas")
-app.geometry("600x550")
+# Usamos ttkbootstrap Window en lugar de tk.Tk
+app = ttk.Window(themename=THEME_NAME)
+app.title("AI Real Estate Predictor")
+app.geometry("900x650")
 
-# Estilo
-style = ttk.Style(app)
-style.theme_use("clam")
-style.configure("TLabel", padding=5, font=("Arial", 10))
-style.configure("TEntry", padding=5)
-style.configure("TCombobox", padding=5)
-style.configure("Accent.TButton", font=("Arial", 12, "bold"), padding=10)
-style.configure("Result.TLabel", font=("Arial", 14, "bold"), padding=10, foreground="#0078D4")
+# Contenedor principal con scroll (por si la pantalla es chica)
+main_container = ttk.Frame(app, padding=20)
+main_container.pack(fill=BOTH, expand=True)
 
-# Frame principal
-main_frame = ttk.Frame(app, padding="15")
-main_frame.pack(fill=tk.BOTH, expand=True)
+# --- CABECERA ---
+header_frame = ttk.Frame(main_container)
+header_frame.pack(fill=X, pady=(0, 20))
 
-# --- Frame de Entradas (Inputs) ---
-inputs_frame = ttk.LabelFrame(main_frame, text="Especificaciones de la Casa", padding="10")
-inputs_frame.pack(fill=tk.X, expand=True)
+ttk.Label(
+    header_frame, 
+    text="PREDICTOR DE VALOR INMOBILIARIO", 
+    font=("Helvetica", 20, "bold"),
+    bootstyle="primary"
+).pack(side=LEFT)
 
-# Crear la cuadrícula de widgets (2 columnas)
-cols = 2
-row_num = 0
-col_num = 0
+ttk.Label(
+    header_frame, 
+    text="v2.0 • Powered by TensorFlow", 
+    font=("Helvetica", 10),
+    bootstyle="secondary"
+).pack(side=LEFT, padx=10, pady=8)
+
+# --- CUERPO (Grid de Inputs) ---
+# Dividiremos los inputs en 3 columnas lógicas para que se vea ordenado
+
+body_frame = ttk.Frame(main_container)
+body_frame.pack(fill=BOTH, expand=True)
+
 widgets = {}
 
-# Crear campos numéricos
-for col in NUMERIC_COLS:
-    ttk.Label(inputs_frame, text=f"{col}:").grid(row=row_num, column=col_num*2, sticky=tk.W, padx=5)
-    entry = ttk.Entry(inputs_frame, width=15)
-    entry.grid(row=row_num, column=col_num*2 + 1, sticky=tk.EW, padx=5, pady=2)
-    entry.insert(0, "0") # Valor por defecto
-    widgets[col] = entry
+def create_input_group(parent, title, items, is_combo=False):
+    """Ayuda a crear grupos de inputs con estilo"""
+    frame = ttk.Labelframe(parent, text=title, padding=15, bootstyle="info")
+    frame.pack(fill=X, pady=10)
     
-    col_num = (col_num + 1) % cols
-    if col_num == 0:
-        row_num += 1
+    for i, item in enumerate(items):
+        ttk.Label(frame, text=item.capitalize()).grid(row=i, column=0, sticky=W, pady=5)
+        
+        if is_combo:
+            # Dropdown
+            inp = ttk.Combobox(frame, values=CATEGORICAL_COLS[item], state="readonly")
+            if CATEGORICAL_COLS[item]: inp.current(0)
+        else:
+            # Input numérico
+            inp = ttk.Entry(frame)
+            inp.insert(0, "0")
+            
+        inp.grid(row=i, column=1, sticky=EW, padx=(10, 0))
+        frame.columnconfigure(1, weight=1)
+        widgets[item] = inp
 
-# Asegurar que los categóricos empiecen en una nueva fila
-if col_num != 0:
-    row_num += 1
-    col_num = 0
+# Columnas de diseño
+col1 = ttk.Frame(body_frame); col1.pack(side=LEFT, fill=BOTH, expand=True, padx=5)
+col2 = ttk.Frame(body_frame); col2.pack(side=LEFT, fill=BOTH, expand=True, padx=5)
+col3 = ttk.Frame(body_frame); col3.pack(side=LEFT, fill=BOTH, expand=True, padx=5)
 
-# Crear campos categóricos (desplegables)
-for col, options in CATEGORICAL_COLS.items():
-    ttk.Label(inputs_frame, text=f"{col}:").grid(row=row_num, column=col_num*2, sticky=tk.W, padx=5)
-    combo = ttk.Combobox(inputs_frame, values=options, state="readonly", width=18)
-    combo.grid(row=row_num, column=col_num*2 + 1, sticky=tk.EW, padx=5, pady=2)
-    combo.current(0) # Seleccionar el primer ítem
-    widgets[col] = combo
-    
-    col_num = (col_num + 1) % cols
-    if col_num == 0:
-        row_num += 1
+# Grupo 1: Dimensiones y Habitaciones (Columna 1)
+create_input_group(col1, "Dimensiones", ['lotSize', 'livingArea', 'landValue'])
+create_input_group(col1, "Distribución", ['rooms', 'bedrooms', 'bathrooms'])
 
-# Configurar expansión de columnas en el grid
-inputs_frame.grid_columnconfigure(1, weight=1)
-inputs_frame.grid_columnconfigure(3, weight=1)
+# Grupo 2: Características Técnicas (Columna 2)
+create_input_group(col2, "Detalles", ['age', 'fireplaces', 'pctCollege'])
+create_input_group(col2, "Sistemas", ['heating', 'fuel', 'sewer'], is_combo=True)
 
-# --- Frame de Resultados ---
-result_frame = ttk.Frame(main_frame, padding="10")
-result_frame.pack(fill=tk.X, expand=True)
+# Grupo 3: Extras y Estatus (Columna 3)
+create_input_group(col3, "Características Extra", ['centralAir', 'waterfront', 'newConstruction'], is_combo=True)
 
-# Botón de predicción
+# --- PANEL DE RESULTADOS Y BOTÓN ---
+# Un panel lateral o inferior muy visible
+result_panel = ttk.Frame(main_container, padding=(0, 20, 0, 0))
+result_panel.pack(fill=X, side=BOTTOM)
+
+# Separador
+ttk.Separator(result_panel, orient=HORIZONTAL).pack(fill=X, pady=10)
+
 btn_predict = ttk.Button(
-    result_frame,
-    text="Predecir Precio",
+    result_panel, 
+    text="CALCULAR PRECIO ➔", 
     command=predecir_precio,
-    style="Accent.TButton"
+    style="success.TButton",
+    width=25
 )
-btn_predict.pack(pady=15)
+btn_predict.pack(pady=10)
 
-# Etiqueta de resultado
-result_var = tk.StringVar()
-result_var.set("Ingrese las especificaciones y presione 'Predecir'")
-lbl_result = ttk.Label(
-    result_frame,
-    textvariable=result_var,
-    style="Result.TLabel",
-    anchor=tk.CENTER
+lbl_result_msg = ttk.Label(result_panel, text="Esperando datos...", font=("Helvetica", 12))
+lbl_result_msg.pack()
+
+lbl_result_value = ttk.Label(
+    result_panel, 
+    text="$ 0.00", 
+    font=("Helvetica", 32, "bold"), 
+    bootstyle="inverse-success"
 )
-lbl_result.pack(pady=10)
+lbl_result_value.pack(pady=5)
 
-# Iniciar la aplicación
+# Footer
+ttk.Label(result_panel, text="El cálculo puede variar según condiciones del mercado", font=("Arial", 8), bootstyle="secondary").pack(pady=10)
+
+if not files_exist:
+    messagebox.showwarning("Modo Demo", "No se encontraron los archivos .keras o .pkl.\nLa interfaz se muestra en modo diseño, pero no predecirá.")
+
 app.mainloop()
